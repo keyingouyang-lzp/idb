@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>idb · 智能数据库</title>
+<style>
+:root {
+  --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
+  --text: #e1e4ed; --text2: #8b8fa7; --accent: #4f8fff;
+  --green: #3fb950; --yellow: #d2991d; --red: #f85149;
+  --radius: 10px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; }
+
+/* Sidebar */
+.sidebar {
+  width:260px; background:var(--surface); border-right:1px solid var(--border);
+  padding:20px; display:flex; flex-direction:column; gap:20px; flex-shrink:0;
+}
+.sidebar h1 { font-size:20px; font-weight:700; }
+.sidebar h1 span { color:var(--accent); }
+.stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.stat { background:var(--bg); border-radius:8px; padding:12px; text-align:center; }
+.stat .num { font-size:22px; font-weight:700; color:var(--accent); }
+.stat .lbl { font-size:11px; color:var(--text2); margin-top:2px; }
+.file-list { flex:1; overflow-y:auto; }
+.file-list h3 { font-size:12px; color:var(--text2); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+.file-item { padding:8px 10px; border-radius:6px; font-size:13px; display:flex; align-items:center; gap:8px; margin-bottom:2px; }
+.file-item:hover { background:var(--border); }
+.file-item .icon { font-size:16px; flex-shrink:0; }
+.file-item .meta { font-size:11px; color:var(--text2); }
+.actions { display:flex; gap:8px; }
+.actions button { flex:1; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); font-size:12px; cursor:pointer; transition:all .2s; }
+.actions button:hover { border-color:var(--accent); color:var(--accent); }
+
+/* Main */
+.main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+
+/* Query bar */
+.query-bar { padding:20px 24px; border-bottom:1px solid var(--border); display:flex; gap:12px; align-items:center; }
+.query-bar input { flex:1; padding:12px 18px; border-radius:24px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:15px; outline:none; transition:border .2s; }
+.query-bar input:focus { border-color:var(--accent); }
+.btn-primary { padding:12px 24px; border-radius:24px; border:none; background:var(--accent); color:#fff; font-size:14px; font-weight:600; cursor:pointer; transition:opacity .2s; white-space:nowrap; }
+.btn-primary:hover { opacity:.85; }
+.btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+.btn-ghost { padding:12px 24px; border-radius:24px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:14px; font-weight:600; cursor:pointer; white-space:nowrap; }
+.btn-ghost:hover { border-color:var(--accent); }
+
+/* Status bar — 常驻进度条 */
+.status-line {
+  margin:0 24px; height:3px; background:var(--border); position:relative; overflow:hidden;
+  opacity:0; transition:opacity .3s;
+}
+.status-line.active { opacity:1; }
+.status-line .fill {
+  height:100%; background:var(--accent);
+  width:0%; transition:width .6s ease;
+  border-radius:0 2px 2px 0;
+}
+.status-line .fill.indeterminate {
+  width:30%; animation:slide 1.5s ease-in-out infinite;
+}
+@keyframes slide { 0%{margin-left:0} 50%{margin-left:70%} 100%{margin-left:0} }
+
+/* Step text */
+.step-text {
+  margin:8px 24px 0; font-size:13px; color:var(--text2);
+  min-height:20px; display:flex; align-items:center; gap:6px;
+}
+.step-text .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); }
+.step-text .dot.done { background:var(--green); }
+
+/* Upload zone */
+.upload-zone { margin:16px 24px; padding:24px; border:2px dashed var(--border); border-radius:var(--radius); text-align:center; cursor:pointer; transition:all .2s; }
+.upload-zone:hover, .upload-zone.drag { border-color:var(--accent); background:rgba(79,143,255,.05); }
+.upload-zone .icon { font-size:32px; margin-bottom:8px; }
+.upload-zone p { font-size:14px; color:var(--text2); }
+.upload-zone p.hint { font-size:11px; margin-top:4px; }
+.upload-zone input { display:none; }
+
+/* Results */
+.results { flex:1; overflow-y:auto; padding:0 24px 24px; }
+.result-card { background:var(--surface); border-radius:var(--radius); padding:20px; margin-bottom:16px; border:1px solid var(--border); }
+.result-card h3 { font-size:14px; color:var(--accent); margin-bottom:12px; }
+.result-table { width:100%; border-collapse:collapse; font-size:13px; }
+.result-table th { text-align:left; padding:10px 12px; border-bottom:2px solid var(--border); color:var(--text2); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
+.result-table td { padding:10px 12px; border-bottom:1px solid var(--border); }
+.result-table tr:last-child td { border-bottom:none; }
+.conf-high { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; background:rgba(63,185,80,.15); color:var(--green); }
+.conf-mid { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; background:rgba(210,153,29,.15); color:var(--yellow); }
+.conf-low { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; background:rgba(248,81,73,.15); color:var(--red); }
+.source-tag { display:inline-block; padding:3px 8px; border-radius:4px; background:var(--bg); font-size:11px; color:var(--text2); margin:2px; }
+.warning { padding:10px 14px; border-radius:6px; background:rgba(210,153,29,.1); color:var(--yellow); font-size:13px; margin-top:12px; }
+.empty { text-align:center; padding:60px 20px; color:var(--text2); }
+.empty .icon { font-size:48px; margin-bottom:12px; }
+.status-bar { padding:8px 24px; font-size:11px; color:var(--text2); border-top:1px solid var(--border); display:flex; justify-content:space-between; }
+.toast { position:fixed; bottom:24px; right:24px; padding:12px 20px; border-radius:8px; font-size:13px; z-index:999; animation:fadeIn .3s; }
+.toast.ok { background:var(--green); color:#fff; }
+.toast.err { background:var(--red); color:#fff; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(10px);} to{opacity:1;transform:translateY(0);} }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <h1>🔮 idb<span>智能数据库</span></h1>
+  <div class="stats">
+    <div class="stat"><div class="num" id="statFiles">-</div><div class="lbl">文件</div></div>
+    <div class="stat"><div class="num" id="statChunks">-</div><div class="lbl">语义块</div></div>
+    <div class="stat"><div class="num" id="statSize">-</div><div class="lbl">MB</div></div>
+    <div class="stat"><div class="num" id="statQueries">-</div><div class="lbl">查询</div></div>
+  </div>
+  <div class="file-list">
+    <h3>📂 已入库文件</h3>
+    <div id="fileList"><span style="color:var(--text2);font-size:13px;">加载中...</span></div>
+  </div>
+  <div class="actions">
+    <button onclick="refreshAll()">🔄 刷新</button>
+    <button onclick="clearCache()">🧹 清缓存</button>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="query-bar">
+    <input type="text" id="queryInput" placeholder="用自然语言提问，比如：列出所有合同的设备名称、中标单位、合同金额" autofocus
+           onkeydown="if(event.key==='Enter')ask()">
+    <button class="btn-primary" id="askBtn" onclick="ask()">🔍 查询</button>
+    <button class="btn-ghost" onclick="quickSearch()">⚡ 快速</button>
+  </div>
+
+  <!-- 常驻状态行：进度条 + 步骤文字 -->
+  <div class="status-line" id="statusLine"><div class="fill" id="statusFill"></div></div>
+  <div class="step-text" id="stepText"></div>
+
+  <div class="upload-zone" id="uploadZone"
+       onclick="document.getElementById('fileInput').click()"
+       ondrop="handleDrop(event)" ondragover="handleDrag(event)" ondragleave="handleDragLeave(event)">
+    <div class="icon">📤</div>
+    <p>拖拽文件到这里，或点击上传</p>
+    <p class="hint">支持 PDF / Word / Excel / PPT / TXT / MD — 扫描件自动 OCR</p>
+    <input type="file" id="fileInput" multiple onchange="handleFiles(this.files)"
+           accept=".pdf,.txt,.md,.csv,.docx,.doc,.xlsx,.xls,.pptx,.log,.json,.xml,.html,.py,.js,.ts,.sh">
+  </div>
+
+  <div class="results" id="results">
+    <div class="empty">
+      <div class="icon">💬</div>
+      <p>上传文件后，用自然语言提问</p>
+      <p style="font-size:12px;margin-top:4px;">Schema-on-Read — 无需建表，即问即答</p>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <span id="statusLeft">🟢 服务运行中</span>
+    <span id="statusRight">idb v2.2</span>
+  </div>
+</div>
+
+<script>
+const API = '';
+let queryCount = 0;
+let lastQuery = '';
+let lastFields = [];
+
+// ═══ 初始化 ═══
+window.onload = () => refreshAll();
+
+async function refreshAll() {
+  try {
+    const r = await fetch(API+'/api/stats'); const d = await r.json();
+    document.getElementById('statFiles').textContent = d.file_count;
+    document.getElementById('statChunks').textContent = d.chunk_count;
+    document.getElementById('statSize').textContent = d.total_size_mb;
+    document.getElementById('statQueries').textContent = queryCount;
+    const fl = document.getElementById('fileList');
+    if (d.files && d.files.length) {
+      fl.innerHTML = d.files.map(f => `
+        <div class="file-item"><span class="icon">${iconForType(f.mime_type)}</span>
+          <div><div>${truncate(f.name,22)}</div>
+          <div class="meta">${f.chunk_count} chunks · ${(f.size_bytes/1024).toFixed(0)}KB</div></div></div>`).join('');
+    } else {
+      fl.innerHTML = '<span style="color:var(--text2);font-size:13px;">暂无文件</span>';
+    }
+  } catch(e) { console.error(e); }
+}
+function iconForType(m) { if(!m)return'📄'; if(m.includes('pdf'))return'📕'; if(m.includes('word')||m.includes('doc'))return'📝'; if(m.includes('sheet')||m.includes('xls')||m.includes('csv'))return'📊'; if(m.includes('presentation')||m.includes('ppt'))return'📽️'; if(m.includes('md'))return'📝'; return'📄'; }
+function truncate(s,n) { return s&&s.length>n?s.slice(0,n)+'…':s; }
+
+// ═══ 状态行控制 ═══
+function startLoading(initialStep) {
+  document.getElementById('statusLine').classList.add('active');
+  document.getElementById('statusFill').className = 'fill indeterminate';
+  document.getElementById('stepText').innerHTML = `<span class="dot"></span> ${initialStep}`;
+}
+
+function updateLoading(step, pct) {
+  const fill = document.getElementById('statusFill');
+  if (pct !== undefined) {
+    fill.className = 'fill';
+    fill.style.width = pct + '%';
+  }
+  // 更新步骤点
+  const steps = document.getElementById('stepText').querySelectorAll('.dot');
+  if (steps.length) steps[0].style.background = 'var(--green)';
+  document.getElementById('stepText').innerHTML =
+    `<span class="dot done"></span> ${step} <span style="color:var(--text2);margin-left:8px;font-size:11px;">${pct||0}%</span>`;
+}
+
+function finishLoading(msg, ok) {
+  const line = document.getElementById('statusLine');
+  const fill = document.getElementById('statusFill');
+  fill.className = 'fill';
+  fill.style.width = '100%';
+  fill.style.background = ok ? 'var(--green)' : 'var(--yellow)';
+  document.getElementById('stepText').innerHTML = `<span class="dot done"></span> ${msg}`;
+  setTimeout(() => {
+    line.classList.remove('active');
+    fill.style.width = '0%';
+    fill.style.background = 'var(--accent)';
+  }, ok ? 1500 : 3000);
+}
+
+// ═══ 上传 ═══
+function handleDrag(e) { e.preventDefault(); document.getElementById('uploadZone').classList.add('drag'); }
+function handleDragLeave(e) { document.getElementById('uploadZone').classList.remove('drag'); }
+function handleDrop(e) {
+  e.preventDefault(); document.getElementById('uploadZone').classList.remove('drag');
+  handleFiles(e.dataTransfer.files);
+}
+
+async function handleFiles(files) {
+  if (!files || !files.length) return;
+  for (const f of files) {
+    startLoading(`📄 正在摄入 ${f.name}`);
+    const fd = new FormData(); fd.append('file', f);
+
+    const xhr = new XMLHttpRequest();
+    const result = await new Promise((resolve, reject) => {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const upPct = Math.round((e.loaded/e.total)*30);
+          updateLoading(`上传中...`, upPct);
+        }
+      };
+      xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)); } catch(e) { reject(e); } };
+      xhr.onerror = () => reject(new Error('网络错误'));
+      xhr.open('POST', API+'/api/ingest'); xhr.send(fd);
+    });
+
+    updateLoading('解析内容 + 智能分块', 50);
+    await sleep(300);
+    updateLoading('向量嵌入 + 写入索引', 80);
+    await sleep(300);
+
+    let ok = false;
+    if (result.status === 'ok') {
+      finishLoading(`✅ ${result.name} — ${result.chunks} chunks${result.ocr_used?' (OCR)':''}`, true);
+      toast(`✅ ${result.name} — ${result.chunks} chunks`, 'ok');
+      ok = true;
+    } else if (result.status === 'skipped') {
+      finishLoading(`⏭️ ${result.name} — ${result.reason}`, true);
+      toast(`⏭️ ${result.name} — ${result.reason}`, 'ok');
+    } else {
+      finishLoading(`❌ ${result.name}`, false);
+      toast(`❌ ${result.name}`, 'err');
+    }
+    await sleep(ok?1000:2500);
+  }
+  refreshAll();
+  document.getElementById('uploadZone').innerHTML = `
+    <div class="icon">📤</div><p>拖拽文件到这里，或点击上传</p>
+    <p class="hint">支持 PDF / Word / Excel / PPT / TXT / MD — 扫描件自动 OCR</p>
+    <input type="file" id="fileInput" multiple onchange="handleFiles(this.files)" accept=".pdf,.txt,.md,.csv,.log,.json,.xml,.html,.py,.js,.ts,.sh">`;
+}
+
+// ═══ 查询 ═══
+async function ask() {
+  const input = document.getElementById('queryInput');
+  const q = input.value.trim();
+  if (!q) return;
+
+  const btn = document.getElementById('askBtn');
+  btn.disabled = true; btn.textContent = '⏳';
+
+  const t0 = Date.now();
+  startLoading('① 分析查询意图');
+
+  try {
+    await sleep(200);
+    updateLoading('② 多路语义检索 (向量+FTS+元数据)', 25);
+
+    const r = await fetch(API+'/api/ask', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ query: q, top_k: 30 })
+    });
+
+    updateLoading('③ RRF融合排序 + LLM提取结构化', 65);
+    const d = await r.json();
+
+    const elapsed = ((Date.now()-t0)/1000).toFixed(1);
+    const records = d.records || [];
+
+    lastQuery = q;
+    lastFields = rf(d);
+
+    if (!records.length) {
+      finishLoading(`未提取到结构化数据 (${elapsed}s)`, false);
+      document.getElementById('results').innerHTML = renderEmpty(d);
+    } else {
+      finishLoading(`✅ 完成 — ${records.length} 条记录 (${elapsed}s)`, true);
+      document.getElementById('results').innerHTML = renderResults(d);
+    }
+
+    queryCount++;
+    document.getElementById('statQueries').textContent = queryCount;
+
+  } catch(e) {
+    finishLoading(`❌ 查询失败: ${e.message}`, false);
+    document.getElementById('results').innerHTML = `<div class="empty"><p style="color:var(--red)">查询失败: ${e.message}</p></div>`;
+  }
+  btn.disabled = false; btn.textContent = '🔍 查询';
+}
+
+async function quickSearch() {
+  const q = document.getElementById('queryInput').value.trim();
+  if (!q) return;
+  startLoading('⚡ 语义搜索中...');
+  try {
+    const r = await fetch(API+'/api/search_simple?q='+encodeURIComponent(q)+'&top=5');
+    const data = await r.json();
+    if (!data.length) {
+      finishLoading('未找到匹配', false);
+      document.getElementById('results').innerHTML = '<div class="empty"><div class="icon">🔍</div><p>未找到相关文档</p></div>';
+    } else {
+      finishLoading(`✅ 找到 ${data.length} 条`, true);
+      document.getElementById('results').innerHTML = data.map((c,i) => `
+        <div class="result-card">
+          <h3>📄 ${c.file_name} · 相关性 ${(c.relevance*100).toFixed(0)}%</h3>
+          <p style="font-size:13px;line-height:1.6;white-space:pre-wrap;">${escapeHtml(c.content)}</p>
+          ${c.location ? `<span class="source-tag">📍 ${c.location}</span>` : ''}
+        </div>`).join('');
+    }
+  } catch(e) {
+    finishLoading('搜索失败', false);
+  }
+}
+
+// ═══ 渲染 ═══
+function renderResults(d) {
+  const records = d.records || [];
+  const fields = [];
+  for (const rec of records) for (const k of Object.keys(rec)) if (!k.startsWith('_') && !fields.includes(k)) fields.push(k);
+  if (!fields.length) fields.push('数据');
+
+  let html = `<div class="result-card"><h3>📊 ${d.query ? d.query.slice(0,50)+'…' : '查询结果'}</h3>
+    <table class="result-table"><thead><tr><th>#</th>`;
+  for (const f of fields) html += `<th>${f}</th>`;
+  html += '<th>置信度</th><th>来源</th></tr></thead><tbody>';
+
+  for (let i=0; i<records.length; i++) {
+    const rec = records[i];
+    html += '<tr><td style="color:var(--text2)">'+(i+1)+'</td>';
+    for (const f of fields) {
+      const v = rec[f];
+      if (v===null||v===undefined) html += '<td style="color:var(--text2)">-</td>';
+      else if (typeof v==='object') html += '<td>'+escapeHtml(JSON.stringify(v).slice(0,80))+'</td>';
+      else html += '<td>'+escapeHtml(String(v).slice(0,120))+'</td>';
+    }
+    const conf = rec._confidence;
+    let ch = '<td>-</td>';
+    if (conf!==undefined&&conf!==null) {
+      const p = (conf*100).toFixed(0)+'%';
+      const cl = conf>=0.8?'conf-high':conf>=0.6?'conf-mid':'conf-low';
+      ch = `<td><span class="${cl}">${p}</span></td>`;
+    }
+    html += ch;
+    html += '<td>'+(rec._source?`<span class="source-tag">${escapeHtml(String(rec._source).slice(0,60))}</span>`:'-')+'</td></tr>';
+  }
+  html += '</tbody></table>';
+
+  if (d.source_files && d.source_files.length) {
+    html += `<div style="margin-top:12px;font-size:12px;color:var(--text2);">📂 `+
+      d.source_files.map(f=>`<span class="source-tag">${escapeHtml(f)}</span>`).join(' ')+
+      ` · 置信度 ${(d.avg_confidence*100).toFixed(0)}% · ${records.length} 条</div>`;
+  }
+  html += `<div style="margin-top:12px;display:flex;gap:8px;">
+    <button class="btn-ghost" style="font-size:12px;padding:8px 16px;" onclick="exportXlsx()">📥 导出 Excel</button>
+  </div>`;
+  if (d.warnings && d.warnings.length) html += d.warnings.map(w=>`<div class="warning">${escapeHtml(w)}</div>`).join('');
+  html += '</div>';
+  return html;
+}
+
+function renderEmpty(d) {
+  const w = d.warnings ? d.warnings.map(w=>`<div class="warning">${escapeHtml(w)}</div>`).join('') : '';
+  return `<div class="empty"><div class="icon">🤷</div><p>未提取到结构化数据</p>${w}</div>`;
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  s = String(s);
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function toast(msg, type) {
+  const t = document.createElement('div'); t.className = 'toast '+type; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(()=>t.remove(), 3000);
+}
+
+async function clearCache() {
+  await fetch(API+'/api/clear-cache',{method:'POST'}).catch(()=>{});
+  toast('缓存已清除','ok');
+}
+
+function rf(d) {
+  const f = [];
+  for (const r of (d.records||[])) for (const k of Object.keys(r)) if (!k.startsWith('_') && !f.includes(k)) f.push(k);
+  return f;
+}
+
+async function exportXlsx() {
+  if (!lastQuery) { toast('请先执行查询', 'err'); return; }
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = '⏳ 导出中...';
+  try {
+    const r = await fetch(API+'/api/export', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ query: lastQuery, fields: lastFields, top_k: 30 })
+    });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.detail || '导出失败'); }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = `idb_export_${new Date().toISOString().slice(0,10)}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast('✅ 导出成功', 'ok');
+  } catch(e) {
+    toast('❌ ' + e.message, 'err');
+  }
+  btn.disabled = false; btn.textContent = '📥 导出 Excel';
+}
+
+function sleep(ms) { return new Promise(r=>setTimeout(r,ms)); }
+
+document.addEventListener('keydown', e => {
+  if ((e.metaKey||e.ctrlKey) && e.key==='k') { e.preventDefault(); document.getElementById('queryInput').focus(); }
+});
+</script>
+</body>
+</html>
